@@ -44,6 +44,9 @@ public partial class GameManager : Node
     // 승자
     public int WinnerId { get; private set; } = -1;
 
+    // 네트워크 매니저 (AI, Local, Ably 모두 대응)
+    private INetworkManager _networkManager;
+
     // 이벤트
     public event Action<GameState> OnStateChanged;
     public event Action OnBoardChanged;
@@ -58,7 +61,46 @@ public partial class GameManager : Node
 
     public override void _ExitTree()
     {
+        if (_networkManager != null)
+        {
+            _networkManager.OnMoveReceived -= OnMoveReceived;
+            _networkManager.OnHandReceived -= OnHandReceived;
+        }
         if (Instance == this) Instance = null;
+    }
+
+    public void SetNetworkManager(INetworkManager nm)
+    {
+        if (_networkManager != null)
+        {
+            _networkManager.OnMoveReceived -= OnMoveReceived;
+            _networkManager.OnHandReceived -= OnHandReceived;
+        }
+
+        _networkManager = nm;
+        _networkManager.OnMoveReceived += OnMoveReceived;
+        _networkManager.OnHandReceived += OnHandReceived;
+        _networkManager.Connect();
+    }
+
+    private void OnMoveReceived(int playerId, MoveDirection direction)
+    {
+        TryMove(playerId, direction);
+    }
+
+    private void OnHandReceived(int playerId, HandType hand)
+    {
+        SubmitHand(playerId, hand);
+    }
+
+    public void RequestMove(int playerId, MoveDirection direction)
+    {
+        _networkManager?.SendMove(playerId, direction);
+    }
+
+    public void RequestHand(int playerId, HandType hand)
+    {
+        _networkManager?.SendHand(playerId, hand);
     }
 
     public void StartNewGame()
