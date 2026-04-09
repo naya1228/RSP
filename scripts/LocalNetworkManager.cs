@@ -5,8 +5,8 @@ using Godot;
 // 이후 AblyNetworkManager로 교체 예정.
 public partial class LocalNetworkManager : Node, INetworkManager
 {
-    public int LocalPlayerId => 0;
-    public int ActivePlayerId { get; private set; } = 0;
+    public int LocalPlayerId => GameManager.PlayerA;
+    public int ActivePlayerId { get; private set; } = GameManager.PlayerA;
     public bool IsConnected { get; private set; } = false;
 
     public event Action<int, MoveDirection> OnMoveReceived;

@@ -1,11 +1,13 @@
+using System.Collections.Generic;
+using System.Linq;
 using Godot;
 
 // 게임 UI: 가위/바위/보 버튼, 이동 버튼, 상태 표시
 public partial class UI : CanvasLayer
 {
-    private Button _rockBtn;
-    private Button _paperBtn;
-    private Button _scissorsBtn;
+    private HBoxContainer _handPanel;
+    private readonly List<Button> _cardButtons = new List<Button>();
+
     private Button _forwardBtn;
     private Button _backwardBtn;
 
@@ -17,9 +19,7 @@ public partial class UI : CanvasLayer
 
     public override void _Ready()
     {
-        _rockBtn = GetNodeOrNull<Button>("Root/HandPanel/RockButton");
-        _paperBtn = GetNodeOrNull<Button>("Root/HandPanel/PaperButton");
-        _scissorsBtn = GetNodeOrNull<Button>("Root/HandPanel/ScissorsButton");
+        _handPanel = GetNodeOrNull<HBoxContainer>("Root/HandPanel");
         _forwardBtn = GetNodeOrNull<Button>("Root/MovePanel/ForwardButton");
         _backwardBtn = GetNodeOrNull<Button>("Root/MovePanel/BackwardButton");
 
@@ -29,9 +29,6 @@ public partial class UI : CanvasLayer
         _handsBLabel = GetNodeOrNull<Label>("Root/HandsBLabel");
         _streakLabel = GetNodeOrNull<Label>("Root/StreakLabel");
 
-        if (_rockBtn != null) _rockBtn.Pressed += () => OnHandPressed(HandType.Rock);
-        if (_paperBtn != null) _paperBtn.Pressed += () => OnHandPressed(HandType.Paper);
-        if (_scissorsBtn != null) _scissorsBtn.Pressed += () => OnHandPressed(HandType.Scissors);
         if (_forwardBtn != null) _forwardBtn.Pressed += () => OnMovePressed(MoveDirection.Forward);
         if (_backwardBtn != null) _backwardBtn.Pressed += () => OnMovePressed(MoveDirection.Backward);
 
@@ -43,7 +40,9 @@ public partial class UI : CanvasLayer
             gm.OnTurnChanged += OnTurnChanged;
             gm.OnDuelResolved += OnDuelResolved;
             gm.OnGameOver += OnGameOver;
+            gm.OnCardDrawn += OnCardDrawn;
             RefreshLabels();
+            RefreshHandCards();
             OnStateChanged(gm.CurrentState);
         }
     }
@@ -58,6 +57,7 @@ public partial class UI : CanvasLayer
             gm.OnTurnChanged -= OnTurnChanged;
             gm.OnDuelResolved -= OnDuelResolved;
             gm.OnGameOver -= OnGameOver;
+            gm.OnCardDrawn -= OnCardDrawn;
         }
     }
 
@@ -68,12 +68,12 @@ public partial class UI : CanvasLayer
         if (gm.CurrentState != GameManager.GameState.Duel) return;
 
         // 결투 중에는 턴과 상관없이 내가 패를 낼 수 있어야 함
-        if (gm.GetHandCount(0, hand) <= 0) return;
-        
-        gm.RequestHand(0, hand);
+        if (!gm.GetHand(GameManager.PlayerA).Contains(hand)) return;
+
+        gm.RequestHand(GameManager.PlayerA, hand);
 
         SetStatusText("선택 완료! 상대방의 결정을 기다리는 중...");
-        
+
         // 내가 패를 냈으므로 버튼 비활성화 (결과 나올 때까지)
         DisableHandButtons();
     }
@@ -83,21 +83,22 @@ public partial class UI : CanvasLayer
         var gm = GameManager.Instance;
         if (gm == null) return;
         if (gm.CurrentState != GameManager.GameState.Moving) return;
-        
+
         // 이동은 내 차례일 때만 가능
-        if (gm.CurrentTurnPlayer != 0) return;
-        
-        gm.RequestMove(0, dir);
+        if (gm.CurrentTurnPlayer != GameManager.PlayerA) return;
+
+        gm.RequestMove(GameManager.PlayerA, dir);
     }
 
     private void OnStateChanged(GameManager.GameState state)
     {
+        RefreshHandCards();
         RefreshButtonStates();
 
         if (state == GameManager.GameState.Duel)
             SetStatusText("결투! 패를 선택하세요");
         else if (state == GameManager.GameState.Moving)
-            SetStatusText(GameManager.Instance.CurrentTurnPlayer == 0 ? "나의 이동 차례" : "상대방 이동 중...");
+            SetStatusText(GameManager.Instance.CurrentTurnPlayer == GameManager.PlayerA ? "나의 이동 차례" : "상대방 이동 중...");
         else if (state == GameManager.GameState.GameOver)
             SetStatusText("게임 종료");
     }
@@ -105,9 +106,64 @@ public partial class UI : CanvasLayer
     private void OnTurnChanged(int playerId)
     {
         RefreshButtonStates();
-        
+
         if (GameManager.Instance.CurrentState == GameManager.GameState.Moving)
-            SetStatusText(playerId == 0 ? "나의 차례" : "상대방 차례...");
+            SetStatusText(playerId == GameManager.PlayerA ? "나의 차례" : "상대방 차례...");
+    }
+
+    private void OnCardDrawn(int playerId)
+    {
+        if (playerId == GameManager.PlayerA) RefreshHandCards();
+    }
+
+    private void RefreshHandCards()
+    {
+        if (_handPanel == null) return;
+        var gm = GameManager.Instance;
+        if (gm == null) return;
+
+        // 기존 카드 버튼 제거
+        foreach (var btn in _cardButtons)
+            btn.QueueFree();
+        _cardButtons.Clear();
+
+        bool duel = gm.CurrentState == GameManager.GameState.Duel;
+        var hand = gm.GetHand(GameManager.PlayerA);
+
+        foreach (var cardType in hand)
+        {
+            var btn = new Button();
+            btn.CustomMinimumSize = new Vector2(100, 70);
+            btn.Text = cardType switch {
+                HandType.Rock => "바위",
+                HandType.Paper => "보",
+                HandType.Scissors => "가위",
+                _ => "?"
+            };
+
+            // 색상 구분
+            var style = new StyleBoxFlat();
+            style.BgColor = cardType switch {
+                HandType.Rock => new Color(0.5f, 0.5f, 0.5f),
+                HandType.Paper => new Color(0.3f, 0.5f, 0.9f),
+                HandType.Scissors => new Color(0.9f, 0.3f, 0.3f),
+                _ => new Color(0.8f, 0.8f, 0.8f)
+            };
+            style.CornerRadiusTopLeft = style.CornerRadiusTopRight =
+            style.CornerRadiusBottomLeft = style.CornerRadiusBottomRight = 8;
+            btn.AddThemeStyleboxOverride("normal", style);
+
+            var captured = cardType;
+            btn.Pressed += () => OnHandPressed(captured);
+            btn.Disabled = !duel;
+
+            _handPanel.AddChild(btn);
+            _cardButtons.Add(btn);
+        }
+
+        // HandsALabel: 손패 요약 + 덱 남은 수
+        if (_handsALabel != null)
+            _handsALabel.Text = $"내 패: {hand.Count}장 | 덱: {gm.GetDeckCount(GameManager.PlayerA)}장";
     }
 
     private void RefreshButtonStates()
@@ -119,10 +175,9 @@ public partial class UI : CanvasLayer
         bool moving = gm.CurrentState == GameManager.GameState.Moving;
         bool isMyTurn = gm.CurrentTurnPlayer == 0;
 
-        // 결투 버튼: 결투 상태이면 턴과 상관없이 활성화
-        if (_rockBtn != null) _rockBtn.Disabled = !duel;
-        if (_paperBtn != null) _paperBtn.Disabled = !duel;
-        if (_scissorsBtn != null) _scissorsBtn.Disabled = !duel;
+        // 카드 버튼: 결투 상태이면 활성화
+        foreach (var btn in _cardButtons)
+            btn.Disabled = !duel;
 
         // 이동 버튼: 내 이동 차례일 때만 활성화
         if (_forwardBtn != null) _forwardBtn.Disabled = !(moving && isMyTurn);
@@ -131,9 +186,8 @@ public partial class UI : CanvasLayer
 
     private void DisableHandButtons()
     {
-        if (_rockBtn != null) _rockBtn.Disabled = true;
-        if (_paperBtn != null) _paperBtn.Disabled = true;
-        if (_scissorsBtn != null) _scissorsBtn.Disabled = true;
+        foreach (var btn in _cardButtons)
+            btn.Disabled = true;
     }
 
     private void OnDuelResolved(int p0, HandType h0, int p1, HandType h1, int winner)
@@ -142,14 +196,14 @@ public partial class UI : CanvasLayer
             ? $"비김! (나:{h0} vs 상대:{h1})"
             : (winner == 0 ? $"승리! (나:{h0} vs 상대:{h1})" : $"패배! (나:{h0} vs 상대:{h1})");
         if (_resultLabel != null) _resultLabel.Text = result;
+
+        RefreshHandCards();
     }
 
     private void OnGameOver(int winner)
     {
-        SetStatusText(winner == 0 ? "최종 승리!" : "최종 패배...");
-        if (_rockBtn != null) _rockBtn.Disabled = true;
-        if (_paperBtn != null) _paperBtn.Disabled = true;
-        if (_scissorsBtn != null) _scissorsBtn.Disabled = true;
+        SetStatusText(winner == GameManager.PlayerA ? "최종 승리!" : "최종 패배...");
+        DisableHandButtons();
         if (_forwardBtn != null) _forwardBtn.Disabled = true;
         if (_backwardBtn != null) _backwardBtn.Disabled = true;
     }
@@ -164,18 +218,13 @@ public partial class UI : CanvasLayer
         var gm = GameManager.Instance;
         if (gm == null) return;
 
-        // 나(A): 구체적으로 표시
-        if (_handsALabel != null)
-            _handsALabel.Text = $"내 패 - 바위:{gm.GetHandCount(0, HandType.Rock)} 보:{gm.GetHandCount(0, HandType.Paper)} 가위:{gm.GetHandCount(0, HandType.Scissors)}";
+        RefreshHandCards();
 
         // 상대(B): 총합만 표시 (정보 은폐)
         if (_handsBLabel != null)
-        {
-            int totalB = gm.GetHandCount(1, HandType.Rock) + gm.GetHandCount(1, HandType.Paper) + gm.GetHandCount(1, HandType.Scissors);
-            _handsBLabel.Text = $"상대방 남은 패: {totalB}장";
-        }
+            _handsBLabel.Text = $"상대방 남은 패: {gm.GetHand(GameManager.PlayerB).Count}장";
 
         if (_streakLabel != null)
-            _streakLabel.Text = $"나의 연패: {gm.LoseStreak[0]} / 상대 연패: {gm.LoseStreak[1]}";
+            _streakLabel.Text = $"나의 연패: {gm.LoseStreak[GameManager.PlayerA]} / 상대 연패: {gm.LoseStreak[GameManager.PlayerB]}";
     }
 }

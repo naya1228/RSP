@@ -1,11 +1,12 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 
 public partial class AiNetworkManager : Node, INetworkManager
 {
-    public int LocalPlayerId => 0; // 사람은 항상 0번
-    public int ActivePlayerId => 0; // AI 모드에선 의미 없음
+    public int LocalPlayerId => GameManager.PlayerA; // 사람은 항상 A
+    public int ActivePlayerId => GameManager.PlayerA; // AI 모드에선 의미 없음
     public bool IsConnected { get; private set; } = false;
 
     public event Action<int, MoveDirection> OnMoveReceived;
@@ -38,30 +39,30 @@ public partial class AiNetworkManager : Node, INetworkManager
     // 사람이 보낸 입력 처리
     public void SendMove(int playerId, MoveDirection direction)
     {
-        if (playerId == 0)
+        if (playerId == GameManager.PlayerA)
         {
-            OnMoveReceived?.Invoke(0, direction);
+            OnMoveReceived?.Invoke(GameManager.PlayerA, direction);
         }
     }
 
     public void SendHand(int playerId, HandType hand)
     {
-        if (playerId == 0)
+        if (playerId == GameManager.PlayerA)
         {
-            OnHandReceived?.Invoke(0, hand);
+            OnHandReceived?.Invoke(GameManager.PlayerA, hand);
         }
     }
 
     private async void OnTurnChanged(int nextPlayerId)
     {
-        if (nextPlayerId == 1 && GameManager.Instance.CurrentState == GameManager.GameState.Moving)
+        if (nextPlayerId == GameManager.PlayerB && GameManager.Instance.CurrentState == GameManager.GameState.Moving)
         {
             await Task.Delay(800); // AI 생각 시간
             if (!IsConnected) return;
 
             // AI 이동 전략: 70% 확률로 전진, 30% 확률로 후진 (단, 첫 턴은 무조건 전진)
             var dir = (_random.NextDouble() < 0.7) ? MoveDirection.Forward : MoveDirection.Backward;
-            OnMoveReceived?.Invoke(1, dir);
+            OnMoveReceived?.Invoke(GameManager.PlayerB, dir);
         }
     }
 
@@ -87,7 +88,7 @@ public partial class AiNetworkManager : Node, INetworkManager
 
             foreach (var h in hands)
             {
-                if (GameManager.Instance.GetHandCount(1, h) > 0)
+                if (GameManager.Instance.GetHand(GameManager.PlayerB).Contains(h))
                 {
                     selectedHand = h;
                     break;
@@ -96,7 +97,7 @@ public partial class AiNetworkManager : Node, INetworkManager
 
             if (selectedHand.HasValue)
             {
-                OnHandReceived?.Invoke(1, selectedHand.Value);
+                OnHandReceived?.Invoke(GameManager.PlayerB, selectedHand.Value);
             }
         }
     }

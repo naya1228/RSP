@@ -92,8 +92,8 @@ public partial class Game : Node2D
 	{
 		if (GameManager.Instance == null) return;
 
-		var posA = GameManager.Instance.PlayerPositions[0];
-		var posB = GameManager.Instance.PlayerPositions[1];
+		var posA = GameManager.Instance.PlayerPositions[GameManager.PlayerA];
+		var posB = GameManager.Instance.PlayerPositions[GameManager.PlayerB];
 
 		var centerA = GetTileCenter(posA);
 		var centerB = GetTileCenter(posB);
