@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://menubutton"]
+
+[ext_resource type="Theme" path="res://assets/menu_theme.tres" id="1"]
+
+[node name="MenuButton" type="Button"]
+custom_minimum_size = Vector2(280, 56)
+theme = ExtResource("1")
+text = "Button"

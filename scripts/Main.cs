@@ -1,65 +1,61 @@
 using Godot;
 
-// 루트 씬. 로비와 게임 씬 전환을 관리
 public partial class Main : Node2D
 {
-    [Export] public NodePath LobbyPath;
-    [Export] public NodePath StartButtonPath;
+    private Button _singleplayerButton;
+    private Button _multiplayerButton;
+    private Button _settingsButton;
+    private Button _exitButton;
 
-    private GameManager _gameManager;
-    private LocalNetworkManager _network;
-    private Node _currentGameScene;
-
-    private Control _lobby;
-    private Button _startButton;
+    private readonly PackedScene _gameScene = GD.Load<PackedScene>("res://scenes/Game.tscn");
+    private readonly PackedScene _uiScene = GD.Load<PackedScene>("res://scenes/UI.tscn");
+    private readonly PackedScene _multiplayerPopupScene = GD.Load<PackedScene>("res://scenes/MultiplayerPopup.tscn");
+    private readonly PackedScene _settingsPopupScene = GD.Load<PackedScene>("res://scenes/SettingsPopup.tscn");
 
     public override void _Ready()
     {
-        // 매니저 인스턴스 생성
-        _gameManager = new GameManager { Name = "GameManager" };
-        AddChild(_gameManager);
+        _singleplayerButton = GetNode<Button>("Menu/SingleplayerButton");
+        _multiplayerButton = GetNode<Button>("Menu/MultiplayerButton");
+        _settingsButton = GetNode<Button>("Menu/SettingsButton");
+        _exitButton = GetNode<Button>("Menu/ExitButton");
 
-        _network = new LocalNetworkManager { Name = "NetworkManager" };
-        AddChild(_network);
-        _network.Connect();
+        _singleplayerButton.Pressed += OnSingleplayerPressed;
+        _multiplayerButton.Pressed += OnMultiplayerPressed;
+        _settingsButton.Pressed += OnSettingsPressed;
+        _exitButton.Pressed += OnExitPressed;
 
-        _lobby = GetNodeOrNull<Control>("Lobby");
-        _startButton = GetNodeOrNull<Button>("Lobby/StartButton");
-
-        if (_startButton != null)
-        {
-            _startButton.Pressed += OnStartPressed;
-        }
-
-        _gameManager.OnGameOver += OnGameOver;
+        var gm = new GameManager { Name = "GameManager" };
+        AddChild(gm);
     }
 
-    private void OnStartPressed()
+    private void OnSingleplayerPressed()
     {
-        if (_lobby != null) _lobby.Visible = false;
+        GetNode("Menu").QueueFree();
 
-        // Game.tscn과 UI.tscn을 동적으로 추가
-        var gameScene = GD.Load<PackedScene>("res://scenes/Game.tscn");
-        var uiScene = GD.Load<PackedScene>("res://scenes/UI.tscn");
+        AddChild(_gameScene.Instantiate());
+        AddChild(_uiScene.Instantiate());
 
-        if (gameScene != null)
-        {
-            var gameInst = gameScene.Instantiate();
-            AddChild(gameInst);
-            _currentGameScene = gameInst;
-        }
-
-        if (uiScene != null)
-        {
-            var uiInst = uiScene.Instantiate();
-            AddChild(uiInst);
-        }
-
-        _gameManager.StartNewGame();
+        GameManager.Instance.StartNewGame();
     }
 
-    private void OnGameOver(int winnerId)
+    private void OnMultiplayerPressed()
     {
-        GD.Print($"[Main] Game Over. Winner: Player {winnerId}");
+        if (GetNodeOrNull("MultiplayerPopup") != null) return;
+        var popup = _multiplayerPopupScene.Instantiate();
+        popup.Name = "MultiplayerPopup";
+        AddChild(popup);
+    }
+
+    private void OnSettingsPressed()
+    {
+        if (GetNodeOrNull("SettingsPopup") != null) return;
+        var popup = _settingsPopupScene.Instantiate();
+        popup.Name = "SettingsPopup";
+        AddChild(popup);
+    }
+
+    private void OnExitPressed()
+    {
+        GetTree().Quit();
     }
 }
