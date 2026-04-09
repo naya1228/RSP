@@ -35,6 +35,11 @@ public partial class Main : Node2D
         AddChild(_gameScene.Instantiate());
         AddChild(_uiScene.Instantiate());
 
+        // AI 네트워크 매니저 생성 및 설정
+        var aiManager = new AiNetworkManager();
+        AddChild(aiManager);
+        
+        GameManager.Instance.SetNetworkManager(aiManager);
         GameManager.Instance.StartNewGame();
     }
 
