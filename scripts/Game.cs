@@ -1,4 +1,5 @@
 using Godot;
+using System.Collections.Generic;
 
 // 보드 및 플레이어 시각화
 public partial class Game : Node2D
@@ -58,7 +59,9 @@ public partial class Game : Node2D
 		if (GameManager.Instance != null)
 		{
 			GameManager.Instance.OnBoardChanged += UpdateBoard;
+			GameManager.Instance.OnTurnChanged += OnTurnChanged;
 			UpdateBoard();
+			OnTurnChanged(GameManager.Instance.CurrentTurnPlayer);
 		}
 	}
 
@@ -67,17 +70,56 @@ public partial class Game : Node2D
 		if (GameManager.Instance != null)
 		{
 			GameManager.Instance.OnBoardChanged -= UpdateBoard;
+			GameManager.Instance.OnTurnChanged -= OnTurnChanged;
+		}
+	}
+
+	public override void _Input(InputEvent @event)
+	{
+		if (@event is not InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } mouseBtn) return;
+
+		var gm = GameManager.Instance;
+		if (gm == null || gm.CurrentState != GameManager.GameState.Moving) return;
+		if (gm.CurrentTurnPlayer != GameManager.PlayerA) return;
+
+		// 뷰포트 좌표 → 로컬 좌표 변환
+		var localPos = ToLocal(GetViewport().GetScreenTransform().AffineInverse() * mouseBtn.Position);
+
+		foreach (var idx in gm.GetReachableTiles())
+		{
+			var tileRect = new Rect2(
+				BoardStartX + idx * (TileSize + TileSpacing),
+				BoardY,
+				TileSize,
+				TileSize
+			);
+			if (tileRect.HasPoint(localPos))
+			{
+				gm.TryMoveToTile(idx);
+				return;
+			}
+		}
+	}
+
+	private void OnTurnChanged(int playerId)
+	{
+		// 모든 타일 원래 색으로 초기화
+		for (int i = 0; i < TileCount; i++)
+			_tiles[i].Color = GetTileColor(i);
+
+		// 내 차례이면 이동 가능 칸 노란색으로 표시
+		if (playerId == GameManager.PlayerA)
+		{
+			foreach (var idx in GameManager.Instance.GetReachableTiles())
+				_tiles[idx].Color = new Color(1f, 1f, 0f);
 		}
 	}
 
 	private Color GetTileColor(int index)
 	{
-		// 양 끝: 출발점 (진한 녹색)
 		if (index == 0) return new Color(0.1f, 0.3f, 0.7f);
 		if (index == 9) return new Color(0.7f, 0.2f, 0.2f);
-		// 효과 칸: 3, 6
 		if (index == 3 || index == 6) return new Color(0.9f, 0.8f, 0.2f);
-		// 일반
 		return new Color(0.6f, 0.6f, 0.6f);
 	}
 
@@ -98,7 +140,6 @@ public partial class Game : Node2D
 		var centerA = GetTileCenter(posA);
 		var centerB = GetTileCenter(posB);
 
-		// 겹칠 경우 좌우로 살짝 오프셋
 		if (posA == posB)
 		{
 			_playerA.Position = centerA - new Vector2(TileSize * 0.3f, TileSize * 0.25f);

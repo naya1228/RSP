@@ -8,9 +8,6 @@ public partial class UI : CanvasLayer
     private HBoxContainer _handPanel;
     private readonly List<Button> _cardButtons = new List<Button>();
 
-    private Button _forwardBtn;
-    private Button _backwardBtn;
-
     private Label _statusLabel;
     private Label _resultLabel;
     private Label _handsALabel;
@@ -20,17 +17,12 @@ public partial class UI : CanvasLayer
     public override void _Ready()
     {
         _handPanel = GetNodeOrNull<HBoxContainer>("Root/HandPanel");
-        _forwardBtn = GetNodeOrNull<Button>("Root/MovePanel/ForwardButton");
-        _backwardBtn = GetNodeOrNull<Button>("Root/MovePanel/BackwardButton");
 
         _statusLabel = GetNodeOrNull<Label>("Root/StatusLabel");
         _resultLabel = GetNodeOrNull<Label>("Root/ResultLabel");
         _handsALabel = GetNodeOrNull<Label>("Root/HandsALabel");
         _handsBLabel = GetNodeOrNull<Label>("Root/HandsBLabel");
         _streakLabel = GetNodeOrNull<Label>("Root/StreakLabel");
-
-        if (_forwardBtn != null) _forwardBtn.Pressed += () => OnMovePressed(MoveDirection.Forward);
-        if (_backwardBtn != null) _backwardBtn.Pressed += () => OnMovePressed(MoveDirection.Backward);
 
         var gm = GameManager.Instance;
         if (gm != null)
@@ -76,18 +68,6 @@ public partial class UI : CanvasLayer
 
         // 내가 패를 냈으므로 버튼 비활성화 (결과 나올 때까지)
         DisableHandButtons();
-    }
-
-    private void OnMovePressed(MoveDirection dir)
-    {
-        var gm = GameManager.Instance;
-        if (gm == null) return;
-        if (gm.CurrentState != GameManager.GameState.Moving) return;
-
-        // 이동은 내 차례일 때만 가능
-        if (gm.CurrentTurnPlayer != GameManager.PlayerA) return;
-
-        gm.RequestMove(GameManager.PlayerA, dir);
     }
 
     private void OnStateChanged(GameManager.GameState state)
@@ -172,16 +152,10 @@ public partial class UI : CanvasLayer
         if (gm == null) return;
 
         bool duel = gm.CurrentState == GameManager.GameState.Duel;
-        bool moving = gm.CurrentState == GameManager.GameState.Moving;
-        bool isMyTurn = gm.CurrentTurnPlayer == 0;
 
         // 카드 버튼: 결투 상태이면 활성화
         foreach (var btn in _cardButtons)
             btn.Disabled = !duel;
-
-        // 이동 버튼: 내 이동 차례일 때만 활성화
-        if (_forwardBtn != null) _forwardBtn.Disabled = !(moving && isMyTurn);
-        if (_backwardBtn != null) _backwardBtn.Disabled = !(moving && isMyTurn);
     }
 
     private void DisableHandButtons()
@@ -194,7 +168,7 @@ public partial class UI : CanvasLayer
     {
         string result = winner == -1
             ? $"비김! (나:{h0} vs 상대:{h1})"
-            : (winner == 0 ? $"승리! (나:{h0} vs 상대:{h1})" : $"패배! (나:{h0} vs 상대:{h1})");
+            : (winner == GameManager.PlayerA ? $"승리! (나:{h0} vs 상대:{h1})" : $"패배! (나:{h0} vs 상대:{h1})");
         if (_resultLabel != null) _resultLabel.Text = result;
 
         RefreshHandCards();
@@ -204,8 +178,6 @@ public partial class UI : CanvasLayer
     {
         SetStatusText(winner == GameManager.PlayerA ? "최종 승리!" : "최종 패배...");
         DisableHandButtons();
-        if (_forwardBtn != null) _forwardBtn.Disabled = true;
-        if (_backwardBtn != null) _backwardBtn.Disabled = true;
     }
 
     private void SetStatusText(string text)

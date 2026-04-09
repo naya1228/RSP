@@ -54,24 +54,6 @@ offset_right = 800.0
 offset_bottom = 190.0
 text = "연패 0 / 0"
 
-[node name="MovePanel" type="HBoxContainer" parent="Root" unique_id=703298982]
-layout_mode = 0
-offset_left = 40.0
-offset_top = 600.0
-offset_right = 400.0
-offset_bottom = 680.0
-theme_override_constants/separation = 20
-
-[node name="ForwardButton" type="Button" parent="Root/MovePanel" unique_id=55727094]
-custom_minimum_size = Vector2(140, 70)
-layout_mode = 2
-text = "전진"
-
-[node name="BackwardButton" type="Button" parent="Root/MovePanel" unique_id=1477843816]
-custom_minimum_size = Vector2(140, 70)
-layout_mode = 2
-text = "후진"
-
 [node name="HandPanel" type="HBoxContainer" parent="Root" unique_id=400513822]
 layout_mode = 0
 offset_left = 436.0
