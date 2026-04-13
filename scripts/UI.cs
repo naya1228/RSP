@@ -62,12 +62,12 @@ public partial class UI : CanvasLayer
         // 결투 중에는 턴과 상관없이 내가 패를 낼 수 있어야 함
         if (!gm.GetHand(GameManager.PlayerA).Contains(hand)) return;
 
-        gm.RequestHand(GameManager.PlayerA, hand);
-
+        // 먼저 현재 버튼을 비활성화 (RequestHand 내부에서 동기적으로 ResolveDuel이 실행될 수 있으므로,
+        // RequestHand 이후에 DisableHandButtons를 호출하면 새로 생성된 버튼까지 꺼버림)
+        DisableHandButtons();
         SetStatusText("선택 완료! 상대방의 결정을 기다리는 중...");
 
-        // 내가 패를 냈으므로 버튼 비활성화 (결과 나올 때까지)
-        DisableHandButtons();
+        gm.RequestHand(GameManager.PlayerA, hand);
     }
 
     private void OnStateChanged(GameManager.GameState state)

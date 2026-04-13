@@ -317,11 +317,17 @@ public partial class GameManager : Node
 
         if (winner == -1)
         {
+            GD.Print("[Draw] 비김 감지");
             _duelHands[PlayerA] = -1;
             _duelHands[PlayerB] = -1;
             DrawCard(PlayerA); DrawCard(PlayerB);
+            GD.Print($"[Draw] 손패 A={_playerHands[PlayerA].Count}장, B={_playerHands[PlayerB].Count}장, 덱A={_playerDecks[PlayerA].Count}, 덱B={_playerDecks[PlayerB].Count}");
             OnDuelResolved?.Invoke(PlayerA, h0, PlayerB, h1, -1);
+            GD.Print("[Draw] OnDuelResolved 완료");
             OnBoardChanged?.Invoke();
+            GD.Print("[Draw] ChangeState(Duel) 호출");
+            ChangeState(GameState.Duel);
+            GD.Print("[Draw] ChangeState(Duel) 완료");
             return;
         }
 

@@ -10,9 +10,16 @@ public partial class Game : Node2D
 	private const int BoardStartX = 120;
 	private const int BoardY = 360;
 
+	private const float JumpDuration = 0.35f;
+	private const float JumpHeight = 120f; // 타일 크기 1.5배
+
 	private ColorRect[] _tiles = new ColorRect[TileCount];
 	private ColorRect _playerA;
 	private ColorRect _playerB;
+
+	private Tween _tweenA;
+	private Tween _tweenB;
+	private bool _isAnimating;
 
 	public override void _Ready()
 	{
@@ -82,6 +89,9 @@ public partial class Game : Node2D
 		if (gm == null || gm.CurrentState != GameManager.GameState.Moving) return;
 		if (gm.CurrentTurnPlayer != GameManager.PlayerA) return;
 
+		// 애니메이션 중에는 입력 무시
+		if (_isAnimating) return;
+
 		// 뷰포트 좌표 → 로컬 좌표 변환
 		var localPos = ToLocal(GetViewport().GetScreenTransform().AffineInverse() * mouseBtn.Position);
 
@@ -130,6 +140,48 @@ public partial class Game : Node2D
 		return new Vector2(x, y);
 	}
 
+	/// <summary>
+	/// 논리 위치 기준 시각 목표 위치 계산 (겹침 오프셋 포함)
+	/// </summary>
+	private Vector2 GetTargetPosition(int posIndex, bool isPlayerA, bool overlapping)
+	{
+		var center = GetTileCenter(posIndex);
+		if (overlapping)
+		{
+			if (isPlayerA)
+				return center - new Vector2(TileSize * 0.3f, TileSize * 0.25f);
+			else
+				return center + new Vector2(TileSize * 0.05f, -TileSize * 0.25f);
+		}
+		else
+		{
+			return center - new Vector2(TileSize * 0.25f, TileSize * 0.25f);
+		}
+	}
+
+	/// <summary>
+	/// 포물선 Tween: X는 선형 이동, Y는 4*h*t*(1-t) 포물선으로 호를 그리며 착지
+	/// </summary>
+	private Tween CreateJumpTween(ColorRect node, Vector2 target, bool isPlayerA)
+	{
+		ref var tweenRef = ref (isPlayerA ? ref _tweenA : ref _tweenB);
+		if (tweenRef != null && tweenRef.IsValid())
+			tweenRef.Kill();
+
+		var startPos = node.Position;
+
+		var tween = CreateTween();
+		tween.TweenMethod(Callable.From((float t) =>
+		{
+			float x = Mathf.Lerp(startPos.X, target.X, t);
+			float y = Mathf.Lerp(startPos.Y, target.Y, t) - 4f * JumpHeight * t * (1f - t);
+			node.Position = new Vector2(x, y);
+		}), 0f, 1f, JumpDuration);
+
+		tweenRef = tween;
+		return tween;
+	}
+
 	private void UpdateBoard()
 	{
 		if (GameManager.Instance == null) return;
@@ -137,18 +189,38 @@ public partial class Game : Node2D
 		var posA = GameManager.Instance.PlayerPositions[GameManager.PlayerA];
 		var posB = GameManager.Instance.PlayerPositions[GameManager.PlayerB];
 
-		var centerA = GetTileCenter(posA);
-		var centerB = GetTileCenter(posB);
+		bool overlapping = posA == posB;
 
-		if (posA == posB)
+		var targetA = GetTargetPosition(posA, true, overlapping);
+		var targetB = GetTargetPosition(posB, false, overlapping);
+
+		// 위치가 이미 목표와 같으면 (초기 배치 등) 즉시 반영
+		bool needAnimA = _playerA.Position.DistanceTo(targetA) > 1f;
+		bool needAnimB = _playerB.Position.DistanceTo(targetB) > 1f;
+
+		if (!needAnimA && !needAnimB)
 		{
-			_playerA.Position = centerA - new Vector2(TileSize * 0.3f, TileSize * 0.25f);
-			_playerB.Position = centerB + new Vector2(TileSize * 0.05f, -TileSize * 0.25f);
+			_playerA.Position = targetA;
+			_playerB.Position = targetB;
+			return;
 		}
+
+		_isAnimating = true;
+
+		// 각 플레이어에 대해 점프 Tween 생성
+		Tween lastTween = null;
+		if (needAnimA)
+			lastTween = CreateJumpTween(_playerA, targetA, true);
 		else
-		{
-			_playerA.Position = centerA - new Vector2(TileSize * 0.25f, TileSize * 0.25f);
-			_playerB.Position = centerB - new Vector2(TileSize * 0.25f, TileSize * 0.25f);
-		}
+			_playerA.Position = targetA;
+
+		if (needAnimB)
+			lastTween = CreateJumpTween(_playerB, targetB, false);
+		else
+			_playerB.Position = targetB;
+
+		// 마지막 tween 완료 시 _isAnimating 해제
+		if (lastTween != null)
+			lastTween.Finished += () => _isAnimating = false;
 	}
 }
