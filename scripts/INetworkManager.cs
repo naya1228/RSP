@@ -4,7 +4,10 @@ public enum HandType
 {
     Rock,
     Paper,
-    Scissors
+    Scissors,
+    EnhancedRock,
+    EnhancedPaper,
+    EnhancedScissors
 }
 
 public enum MoveDirection

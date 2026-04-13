@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Godot;
@@ -74,6 +75,10 @@ public partial class AiNetworkManager : Node, INetworkManager
             GD.Print("[AI] OnStateChanged(Duel) → AiSelectHand 시작");
             await AiSelectHand();
         }
+        else if (newState == GameManager.GameState.PickEnhanced)
+        {
+            await AiPickEnhanced();
+        }
     }
 
     private async Task AiSelectHand()
@@ -82,36 +87,39 @@ public partial class AiNetworkManager : Node, INetworkManager
         GD.Print("[AI] 1초 딜레이 완료");
         if (!IsConnected) return;
 
-        // AI 결투 전략: 남은 패 중 랜덤 선택
-        HandType? selectedHand = null;
-        var hands = new HandType[] { HandType.Rock, HandType.Paper, HandType.Scissors };
+        // AI 결투 전략: 실제 손패에서 랜덤 선택 (Enhanced 포함)
+        var availableHands = new List<HandType>(GameManager.Instance.GetHand(GameManager.PlayerB));
 
-        // 셔플 후 첫 번째 가능한 패 선택
-        for (int i = 0; i < 3; i++)
+        if (availableHands.Count == 0)
         {
-            int r = _random.Next(i, 3);
-            var temp = hands[i];
-            hands[i] = hands[r];
-            hands[r] = temp;
+            GD.Print($"[AI] 선택 가능한 패 없음! 손패=0장");
+            return;
         }
 
-        foreach (var h in hands)
+        // 셔플 후 첫 번째 선택
+        for (int i = availableHands.Count - 1; i > 0; i--)
         {
-            if (GameManager.Instance.GetHand(GameManager.PlayerB).Contains(h))
-            {
-                selectedHand = h;
-                break;
-            }
+            int j = _random.Next(i + 1);
+            (availableHands[i], availableHands[j]) = (availableHands[j], availableHands[i]);
         }
 
-        if (selectedHand.HasValue)
+        var selectedHand = availableHands[0];
+        GD.Print($"[AI] 패 선택: {selectedHand}");
+        OnHandReceived?.Invoke(GameManager.PlayerB, selectedHand);
+    }
+
+    private async Task AiPickEnhanced()
+    {
+        await Task.Delay(800); // AI 생각 시간
+        if (!IsConnected) return;
+
+        if (GameManager.Instance.EnhancedPickPlayer == GameManager.PlayerB)
         {
-            GD.Print($"[AI] 패 선택: {selectedHand.Value}");
-            OnHandReceived?.Invoke(GameManager.PlayerB, selectedHand.Value);
-        }
-        else
-        {
-            GD.Print($"[AI] 선택 가능한 패 없음! 손패={GameManager.Instance.GetHand(GameManager.PlayerB).Count}장");
+            // 3종 중 랜덤 픽
+            var choices = new[] { HandType.EnhancedRock, HandType.EnhancedPaper, HandType.EnhancedScissors };
+            var pick = choices[_random.Next(3)];
+            GD.Print($"[AI] 강화패 픽: {pick}");
+            GameManager.Instance.PickEnhancedCard(GameManager.PlayerB, pick);
         }
     }
 }
