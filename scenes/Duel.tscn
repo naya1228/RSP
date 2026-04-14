@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://duel_scene"]
+
+[ext_resource type="Script" uid="uid://duel_script" path="res://scripts/Duel.cs" id="1"]
+
+[node name="Duel" type="Node2D" unique_id=100000001]
+script = ExtResource("1")

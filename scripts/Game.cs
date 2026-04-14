@@ -1,7 +1,7 @@
 using Godot;
 using System.Collections.Generic;
 
-// 보드 및 플레이어 시각화
+// 이동 씬: 보드 시각화 + 이동 관련 UI
 public partial class Game : Node2D
 {
 	private const int TileCount = 10;
@@ -11,7 +11,7 @@ public partial class Game : Node2D
 	private const int BoardY = 360;
 
 	private const float JumpDuration = 0.35f;
-	private const float JumpHeight = 120f; // 타일 크기 1.5배
+	private const float JumpHeight = 120f;
 
 	private ColorRect[] _tiles = new ColorRect[TileCount];
 	private ColorRect _playerA;
@@ -20,6 +20,12 @@ public partial class Game : Node2D
 	private Tween _tweenA;
 	private Tween _tweenB;
 	private bool _isAnimating;
+
+	// 이동 씬 UI Labels
+	private Label _statusLabel;
+	private Label _handsALabel;
+	private Label _handsBLabel;
+	private Label _streakLabel;
 
 	public override void _Ready()
 	{
@@ -36,7 +42,6 @@ public partial class Game : Node2D
 			AddChild(rect);
 			_tiles[i] = rect;
 
-			// 타일 번호 라벨
 			var label = new Label
 			{
 				Text = i.ToString(),
@@ -63,23 +68,92 @@ public partial class Game : Node2D
 		};
 		AddChild(_playerB);
 
-		if (GameManager.Instance != null)
+		// UI Labels
+		_statusLabel  = MakeLabel(new Vector2(40, 20), fontSize: 20);
+		_handsALabel  = MakeLabel(new Vector2(40, 50));
+		_handsBLabel  = MakeLabel(new Vector2(40, 78));
+		_streakLabel  = MakeLabel(new Vector2(40, 106));
+
+		var gm = GameManager.Instance;
+		if (gm != null)
 		{
-			GameManager.Instance.OnBoardChanged += UpdateBoard;
-			GameManager.Instance.OnTurnChanged += OnTurnChanged;
+			gm.OnBoardChanged  += UpdateBoard;
+			gm.OnBoardChanged  += RefreshLabels;
+			gm.OnTurnChanged   += OnTurnChanged;
+			gm.OnStateChanged  += OnStateChanged;
 			UpdateBoard();
-			OnTurnChanged(GameManager.Instance.CurrentTurnPlayer);
+			RefreshLabels();
+			OnTurnChanged(gm.CurrentTurnPlayer);
 		}
 	}
 
 	public override void _ExitTree()
 	{
-		if (GameManager.Instance != null)
+		var gm = GameManager.Instance;
+		if (gm != null)
 		{
-			GameManager.Instance.OnBoardChanged -= UpdateBoard;
-			GameManager.Instance.OnTurnChanged -= OnTurnChanged;
+			gm.OnBoardChanged -= UpdateBoard;
+			gm.OnBoardChanged -= RefreshLabels;
+			gm.OnTurnChanged  -= OnTurnChanged;
+			gm.OnStateChanged -= OnStateChanged;
 		}
 	}
+
+	private Label MakeLabel(Vector2 pos, int fontSize = 15)
+	{
+		var lbl = new Label { Position = pos };
+		lbl.AddThemeFontSizeOverride("font_size", fontSize);
+		lbl.AddThemeColorOverride("font_color", new Color(1f, 1f, 1f));
+		AddChild(lbl);
+		return lbl;
+	}
+
+	// ── 이벤트 핸들러 ──────────────────────────────────────
+
+	private void OnStateChanged(GameManager.GameState state)
+	{
+		if (state == GameManager.GameState.Moving)
+		{
+			var gm = GameManager.Instance;
+			SetStatus(gm?.CurrentTurnPlayer == GameManager.PlayerA ? "나의 차례" : "상대방 차례...");
+			// 타일 강조 복원
+			if (gm != null) HighlightReachable(gm.CurrentTurnPlayer);
+		}
+	}
+
+	private void OnTurnChanged(int playerId)
+	{
+		HighlightReachable(playerId);
+		SetStatus(playerId == GameManager.PlayerA ? "나의 차례" : "상대방 차례...");
+	}
+
+	private void HighlightReachable(int playerId)
+	{
+		for (int i = 0; i < TileCount; i++)
+			_tiles[i].Color = GetTileColor(i);
+
+		if (playerId == GameManager.PlayerA)
+		{
+			foreach (var idx in GameManager.Instance.GetReachableTiles())
+				_tiles[idx].Color = new Color(1f, 1f, 0f);
+		}
+	}
+
+	private void RefreshLabels()
+	{
+		var gm = GameManager.Instance;
+		if (gm == null) return;
+		if (_handsALabel != null)
+			_handsALabel.Text = $"내 패: {gm.GetHand(GameManager.PlayerA).Count}장 | 덱: {gm.GetDeckCount(GameManager.PlayerA)}장";
+		if (_handsBLabel != null)
+			_handsBLabel.Text = $"상대방 남은 패: {gm.GetHand(GameManager.PlayerB).Count}장";
+		if (_streakLabel != null)
+			_streakLabel.Text = $"나의 연패: {gm.LoseStreak[GameManager.PlayerA]}/{gm.MaxLoseStreak[GameManager.PlayerA]} / 상대 연패: {gm.LoseStreak[GameManager.PlayerB]}/{gm.MaxLoseStreak[GameManager.PlayerB]}";
+	}
+
+	private void SetStatus(string text) { if (_statusLabel != null) _statusLabel.Text = text; }
+
+	// ── 입력 처리 ──────────────────────────────────────────
 
 	public override void _Input(InputEvent @event)
 	{
@@ -88,11 +162,8 @@ public partial class Game : Node2D
 		var gm = GameManager.Instance;
 		if (gm == null || gm.CurrentState != GameManager.GameState.Moving) return;
 		if (gm.CurrentTurnPlayer != GameManager.PlayerA) return;
-
-		// 애니메이션 중에는 입력 무시
 		if (_isAnimating) return;
 
-		// 뷰포트 좌표 → 로컬 좌표 변환
 		var localPos = ToLocal(GetViewport().GetScreenTransform().AffineInverse() * mouseBtn.Position);
 
 		foreach (var idx in gm.GetReachableTiles())
@@ -111,19 +182,7 @@ public partial class Game : Node2D
 		}
 	}
 
-	private void OnTurnChanged(int playerId)
-	{
-		// 모든 타일 원래 색으로 초기화
-		for (int i = 0; i < TileCount; i++)
-			_tiles[i].Color = GetTileColor(i);
-
-		// 내 차례이면 이동 가능 칸 노란색으로 표시
-		if (playerId == GameManager.PlayerA)
-		{
-			foreach (var idx in GameManager.Instance.GetReachableTiles())
-				_tiles[idx].Color = new Color(1f, 1f, 0f);
-		}
-	}
+	// ── 보드 시각화 ────────────────────────────────────────
 
 	private Color GetTileColor(int index)
 	{
@@ -140,28 +199,18 @@ public partial class Game : Node2D
 		return new Vector2(x, y);
 	}
 
-	/// <summary>
-	/// 논리 위치 기준 시각 목표 위치 계산 (겹침 오프셋 포함)
-	/// </summary>
 	private Vector2 GetTargetPosition(int posIndex, bool isPlayerA, bool overlapping)
 	{
 		var center = GetTileCenter(posIndex);
 		if (overlapping)
 		{
-			if (isPlayerA)
-				return center - new Vector2(TileSize * 0.3f, TileSize * 0.25f);
-			else
-				return center + new Vector2(TileSize * 0.05f, -TileSize * 0.25f);
+			return isPlayerA
+				? center - new Vector2(TileSize * 0.3f, TileSize * 0.25f)
+				: center + new Vector2(TileSize * 0.05f, -TileSize * 0.25f);
 		}
-		else
-		{
-			return center - new Vector2(TileSize * 0.25f, TileSize * 0.25f);
-		}
+		return center - new Vector2(TileSize * 0.25f, TileSize * 0.25f);
 	}
 
-	/// <summary>
-	/// 포물선 Tween: X는 선형 이동, Y는 4*h*t*(1-t) 포물선으로 호를 그리며 착지
-	/// </summary>
 	private Tween CreateJumpTween(ColorRect node, Vector2 target, bool isPlayerA)
 	{
 		ref var tweenRef = ref (isPlayerA ? ref _tweenA : ref _tweenB);
@@ -169,7 +218,6 @@ public partial class Game : Node2D
 			tweenRef.Kill();
 
 		var startPos = node.Position;
-
 		var tween = CreateTween();
 		tween.TweenMethod(Callable.From((float t) =>
 		{
@@ -188,13 +236,11 @@ public partial class Game : Node2D
 
 		var posA = GameManager.Instance.PlayerPositions[GameManager.PlayerA];
 		var posB = GameManager.Instance.PlayerPositions[GameManager.PlayerB];
-
 		bool overlapping = posA == posB;
 
 		var targetA = GetTargetPosition(posA, true, overlapping);
 		var targetB = GetTargetPosition(posB, false, overlapping);
 
-		// 위치가 이미 목표와 같으면 (초기 배치 등) 즉시 반영
 		bool needAnimA = _playerA.Position.DistanceTo(targetA) > 1f;
 		bool needAnimB = _playerB.Position.DistanceTo(targetB) > 1f;
 
@@ -206,9 +252,8 @@ public partial class Game : Node2D
 		}
 
 		_isAnimating = true;
-
-		// 각 플레이어에 대해 점프 Tween 생성
 		Tween lastTween = null;
+
 		if (needAnimA)
 			lastTween = CreateJumpTween(_playerA, targetA, true);
 		else
@@ -219,7 +264,6 @@ public partial class Game : Node2D
 		else
 			_playerB.Position = targetB;
 
-		// 마지막 tween 완료 시 _isAnimating 해제
 		if (lastTween != null)
 			lastTween.Finished += () => _isAnimating = false;
 	}

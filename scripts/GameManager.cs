@@ -33,7 +33,6 @@ public partial class GameManager : Node
     private List<HandType>[] _playerHands = { new List<HandType>(), new List<HandType>() };
     // 플레이어 덱 (남은 카드)
     private List<HandType>[] _playerDecks = { new List<HandType>(), new List<HandType>() };
-    private bool _isFirstDuel = true;
     private Random _rng = new Random();
 
     // 연패 카운트
@@ -50,6 +49,9 @@ public partial class GameManager : Node
 
     // 보충 회차 (0=첫 보충 전)
     private int[] _replenishCount = new int[2];
+
+    // 패 보충 턴 카운터 (이동 + 결투 승패 각 +1, 비김 제외, 3이 되면 드로우)
+    private int[] _drawTurnCount = new int[2];
 
     // 턴 카운트 (각 플레이어별)
     public int[] TurnCount { get; private set; } = new int[2];
@@ -172,10 +174,10 @@ public partial class GameManager : Node
             _isBlindNextDuel[p] = false;
             _duelWinCount[p] = 0;
             _replenishCount[p] = 0;
+            _drawTurnCount[p] = 0;
             InitPlayerDeck(p);
         }
 
-        _isFirstDuel = true;
         _duelHands[PlayerA] = -1;
         _duelHands[PlayerB] = -1;
         WinnerId = -1;
@@ -264,6 +266,18 @@ public partial class GameManager : Node
         return true;
     }
 
+    // 보충 턴 카운터 증가 (3턴마다 드로우)
+    private void IncrementDrawTurn(int playerId)
+    {
+        _drawTurnCount[playerId]++;
+        GD.Print($"[DrawTurn] Player{playerId} 보충카운터={_drawTurnCount[playerId]}");
+        if (_drawTurnCount[playerId] >= 3)
+        {
+            _drawTurnCount[playerId] = 0;
+            DrawCard(playerId);
+        }
+    }
+
     private static HandType ToEnhanced(HandType h)
     {
         return GetBase(h) switch
@@ -291,6 +305,7 @@ public partial class GameManager : Node
         newPos = Mathf.Clamp(newPos, 0, BoardSize - 1);
         PlayerPositions[playerId] = newPos;
         TurnCount[playerId]++;
+        IncrementDrawTurn(playerId); // 이동 턴 카운트
 
         OnBoardChanged?.Invoke();
 
@@ -307,8 +322,6 @@ public partial class GameManager : Node
         {
             _duelHands[PlayerA] = -1;
             _duelHands[PlayerB] = -1;
-            if (!_isFirstDuel) { DrawCard(PlayerA); DrawCard(PlayerB); }
-            _isFirstDuel = false;
             ChangeState(GameState.Duel);
         }
         else
@@ -329,6 +342,7 @@ public partial class GameManager : Node
 
         PlayerPositions[PlayerA] = targetTile;
         TurnCount[PlayerA]++;
+        IncrementDrawTurn(PlayerA); // 이동 턴 카운트
 
         OnBoardChanged?.Invoke();
 
@@ -344,8 +358,6 @@ public partial class GameManager : Node
         {
             _duelHands[PlayerA] = -1;
             _duelHands[PlayerB] = -1;
-            if (!_isFirstDuel) { DrawCard(PlayerA); DrawCard(PlayerB); }
-            _isFirstDuel = false;
             ChangeState(GameState.Duel);
         }
         else
@@ -414,17 +426,12 @@ public partial class GameManager : Node
 
         if (winner == -1)
         {
-            GD.Print("[Draw] 비김 감지");
+            // 비김: 턴 카운트 없음, 드로우 없음, 재결투
             _duelHands[PlayerA] = -1;
             _duelHands[PlayerB] = -1;
-            DrawCard(PlayerA); DrawCard(PlayerB);
-            GD.Print($"[Draw] 손패 A={_playerHands[PlayerA].Count}장, B={_playerHands[PlayerB].Count}장, 덱A={_playerDecks[PlayerA].Count}, 덱B={_playerDecks[PlayerB].Count}");
             OnDuelResolved?.Invoke(PlayerA, h0, PlayerB, h1, -1);
-            GD.Print("[Draw] OnDuelResolved 완료");
             OnBoardChanged?.Invoke();
-            GD.Print("[Draw] ChangeState(Duel) 호출");
             ChangeState(GameState.Duel);
-            GD.Print("[Draw] ChangeState(Duel) 완료");
             return;
         }
 
@@ -455,6 +462,10 @@ public partial class GameManager : Node
 
         OnDuelResolved?.Invoke(PlayerA, h0, PlayerB, h1, winner);
         OnBoardChanged?.Invoke();
+
+        // 결투 승패 턴 카운트 (양쪽 모두)
+        IncrementDrawTurn(PlayerA);
+        IncrementDrawTurn(PlayerB);
 
         // 탈락 체크: MaxLoseStreak 기준
         if (LoseStreak[loser] >= MaxLoseStreak[loser])
