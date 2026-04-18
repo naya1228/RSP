@@ -13,7 +13,7 @@ public partial class Game : Node2D
 	private const float JumpDuration = 0.35f;
 	private const float JumpHeight = 120f;
 
-	private ColorRect[] _tiles = new ColorRect[TileCount];
+	private Button[] _tiles = new Button[TileCount];
 	private ColorRect _playerA;
 	private ColorRect _playerB;
 
@@ -32,22 +32,29 @@ public partial class Game : Node2D
 		// 타일 생성
 		for (int i = 0; i < TileCount; i++)
 		{
-			var rect = new ColorRect
+			int captured = i;
+			var btn = new Button
 			{
 				Size = new Vector2(TileSize, TileSize),
 				Position = new Vector2(BoardStartX + i * (TileSize + TileSpacing), BoardY),
-				Color = GetTileColor(i),
-				Name = $"Tile{i}"
+				Name = $"Tile{i}",
+				Disabled = true,
+				ClipText = false,
+				Text = ""
 			};
-			AddChild(rect);
-			_tiles[i] = rect;
+			SetTileStyle(btn, GetTileColor(i), true);
+			AddChild(btn);
+			_tiles[i] = btn;
 
 			var label = new Label
 			{
 				Text = i.ToString(),
 				Position = new Vector2(TileSize / 2 - 6, TileSize / 2 - 10),
+				MouseFilter = Control.MouseFilterEnum.Ignore
 			};
-			rect.AddChild(label);
+			btn.AddChild(label);
+
+			btn.Pressed += () => OnTilePressed(captured);
 		}
 
 		// 플레이어 A (파란색)
@@ -55,7 +62,8 @@ public partial class Game : Node2D
 		{
 			Size = new Vector2(TileSize * 0.5f, TileSize * 0.5f),
 			Color = new Color(0.2f, 0.4f, 1.0f),
-			Name = "PlayerA"
+			Name = "PlayerA",
+			MouseFilter = Control.MouseFilterEnum.Ignore
 		};
 		AddChild(_playerA);
 
@@ -64,7 +72,8 @@ public partial class Game : Node2D
 		{
 			Size = new Vector2(TileSize * 0.5f, TileSize * 0.5f),
 			Color = new Color(1.0f, 0.3f, 0.3f),
-			Name = "PlayerB"
+			Name = "PlayerB",
+			MouseFilter = Control.MouseFilterEnum.Ignore
 		};
 		AddChild(_playerB);
 
@@ -77,10 +86,12 @@ public partial class Game : Node2D
 		var gm = GameManager.Instance;
 		if (gm != null)
 		{
-			gm.OnBoardChanged  += UpdateBoard;
-			gm.OnBoardChanged  += RefreshLabels;
-			gm.OnTurnChanged   += OnTurnChanged;
-			gm.OnStateChanged  += OnStateChanged;
+			gm.OnBoardChanged           += UpdateBoard;
+			gm.OnBoardChanged           += RefreshLabels;
+			gm.OnTurnChanged            += OnTurnChanged;
+			gm.OnStateChanged           += OnStateChanged;
+			gm.OnGameOver               += OnGameOver;
+			gm.OnEnhancedPickRequired   += OnEnhancedPickRequired;
 			UpdateBoard();
 			RefreshLabels();
 			OnTurnChanged(gm.CurrentTurnPlayer);
@@ -92,10 +103,12 @@ public partial class Game : Node2D
 		var gm = GameManager.Instance;
 		if (gm != null)
 		{
-			gm.OnBoardChanged -= UpdateBoard;
-			gm.OnBoardChanged -= RefreshLabels;
-			gm.OnTurnChanged  -= OnTurnChanged;
-			gm.OnStateChanged -= OnStateChanged;
+			gm.OnBoardChanged           -= UpdateBoard;
+			gm.OnBoardChanged           -= RefreshLabels;
+			gm.OnTurnChanged            -= OnTurnChanged;
+			gm.OnStateChanged           -= OnStateChanged;
+			gm.OnGameOver               -= OnGameOver;
+			gm.OnEnhancedPickRequired   -= OnEnhancedPickRequired;
 		}
 	}
 
@@ -130,13 +143,25 @@ public partial class Game : Node2D
 	private void HighlightReachable(int playerId)
 	{
 		for (int i = 0; i < TileCount; i++)
-			_tiles[i].Color = GetTileColor(i);
+			SetTileStyle(_tiles[i], GetTileColor(i), true);
 
 		if (playerId == GameManager.PlayerA)
 		{
 			foreach (var idx in GameManager.Instance.GetReachableTiles())
-				_tiles[idx].Color = new Color(1f, 1f, 0f);
+				SetTileStyle(_tiles[idx], new Color(1f, 1f, 0f), false);
 		}
+	}
+
+	private void OnTilePressed(int idx)
+	{
+		if (_isAnimating) return;
+
+		var gm = GameManager.Instance;
+		if (gm == null) return;
+		if (gm.CurrentState != GameManager.GameState.Moving) return;
+		if (gm.CurrentTurnPlayer != GameManager.PlayerA) return;
+
+		gm.TryMoveToTile(idx);
 	}
 
 	private void RefreshLabels()
@@ -153,33 +178,75 @@ public partial class Game : Node2D
 
 	private void SetStatus(string text) { if (_statusLabel != null) _statusLabel.Text = text; }
 
-	// ── 입력 처리 ──────────────────────────────────────────
-
-	public override void _Input(InputEvent @event)
+	private void OnEnhancedPickRequired(int playerId)
 	{
-		if (@event is not InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } mouseBtn) return;
+		if (playerId != GameManager.PlayerA) return;
 
-		var gm = GameManager.Instance;
-		if (gm == null || gm.CurrentState != GameManager.GameState.Moving) return;
-		if (gm.CurrentTurnPlayer != GameManager.PlayerA) return;
-		if (_isAnimating) return;
+		var types = new[] { HandType.EnhancedRock, HandType.EnhancedPaper, HandType.EnhancedScissors };
+		var items = new ItemSelectPopup.ItemOption[types.Length];
+		for (int i = 0; i < types.Length; i++) items[i] = GameManager.BuildCardOption(types[i]);
 
-		var localPos = ToLocal(GetViewport().GetScreenTransform().AffineInverse() * mouseBtn.Position);
-
-		foreach (var idx in gm.GetReachableTiles())
+		var popup = new ItemSelectPopup();
+		AddChild(popup);
+		popup.Selected += (int idx) =>
 		{
-			var tileRect = new Rect2(
-				BoardStartX + idx * (TileSize + TileSpacing),
-				BoardY,
-				TileSize,
-				TileSize
-			);
-			if (tileRect.HasPoint(localPos))
-			{
-				gm.TryMoveToTile(idx);
-				return;
-			}
+			GameManager.Instance?.PickEnhancedCard(GameManager.PlayerA, types[idx]);
+		};
+		popup.Open("강화패를 선택하세요!", items);
+	}
+
+	private void OnGameOver(int winner, GameManager.GameOverReason reason)
+	{
+		int loser = 1 - winner;
+		var loserNode = loser == GameManager.PlayerA ? _playerA : _playerB;
+
+		SetStatus(winner == GameManager.PlayerA ? "승리!" : "패배...");
+
+		// 모든 타일 비활성화
+		for (int i = 0; i < TileCount; i++)
+			SetTileStyle(_tiles[i], GetTileColor(i), true);
+
+		var tween = CreateTween();
+
+		if (reason == GameManager.GameOverReason.ReachedStart)
+		{
+			// 1초 대기 후 시작칸 패배: 타일 위로 밀려나며 페이드 아웃
+			tween.TweenInterval(1.0f);
+			tween.SetParallel(true);
+			tween.TweenProperty(loserNode, "position:y", loserNode.Position.Y - 250f, 0.6f)
+				 .SetTrans(Tween.TransitionType.Linear);
+			tween.TweenProperty(loserNode, "modulate:a", 0f, 0.6f)
+				 .SetTrans(Tween.TransitionType.Linear);
 		}
+		else
+		{
+			// 1초 대기 후 연패 탈락: 아래로 떨어지며 페이드 아웃
+			tween.TweenInterval(1.0f);
+			tween.SetParallel(true);
+			tween.TweenProperty(loserNode, "position:y", loserNode.Position.Y + 300f, 0.7f)
+				 .SetTrans(Tween.TransitionType.Linear);
+			tween.TweenProperty(loserNode, "modulate:a", 0f, 0.7f)
+				 .SetTrans(Tween.TransitionType.Linear);
+		}
+	}
+
+	// ── 타일 스타일 헬퍼 ────────────────────────────────────
+
+	private void SetTileStyle(Button btn, Color color, bool disabled)
+	{
+		btn.Disabled = disabled;
+
+		var styleNormal = new StyleBoxFlat { BgColor = color };
+		btn.AddThemeStyleboxOverride("normal", styleNormal);
+
+		var styleDisabled = new StyleBoxFlat { BgColor = color };
+		btn.AddThemeStyleboxOverride("disabled", styleDisabled);
+
+		var styleHover = new StyleBoxFlat { BgColor = color.Lightened(0.2f) };
+		btn.AddThemeStyleboxOverride("hover", styleHover);
+
+		var stylePressed = new StyleBoxFlat { BgColor = color.Darkened(0.15f) };
+		btn.AddThemeStyleboxOverride("pressed", stylePressed);
 	}
 
 	// ── 보드 시각화 ────────────────────────────────────────
@@ -252,19 +319,14 @@ public partial class Game : Node2D
 		}
 
 		_isAnimating = true;
-		Tween lastTween = null;
+		int pending = 0;
 
-		if (needAnimA)
-			lastTween = CreateJumpTween(_playerA, targetA, true);
-		else
-			_playerA.Position = targetA;
+		void OnTweenDone() { if (--pending == 0) _isAnimating = false; }
 
-		if (needAnimB)
-			lastTween = CreateJumpTween(_playerB, targetB, false);
-		else
-			_playerB.Position = targetB;
+		if (needAnimA) { pending++; CreateJumpTween(_playerA, targetA, true).Finished += OnTweenDone; }
+		else _playerA.Position = targetA;
 
-		if (lastTween != null)
-			lastTween.Finished += () => _isAnimating = false;
+		if (needAnimB) { pending++; CreateJumpTween(_playerB, targetB, false).Finished += OnTweenDone; }
+		else _playerB.Position = targetB;
 	}
 }

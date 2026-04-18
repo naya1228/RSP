@@ -12,8 +12,6 @@ public partial class Duel : Node2D
     private Label _streakLabel;
     private HBoxContainer _handPanel;
     private readonly List<Button> _cardButtons = new();
-    private PanelContainer _enhancedPickPanel;
-    private readonly List<Button> _enhancedPickButtons = new();
     private List<HandType> _blindShuffledHand;
     private bool _isBlindActive = false;
 
@@ -39,9 +37,6 @@ public partial class Duel : Node2D
         _handPanel.AddThemeConstantOverride("separation", 20);
         AddChild(_handPanel);
 
-        // 강화패 픽 패널
-        CreateEnhancedPickPanel();
-
         var gm = GameManager.Instance;
         if (gm != null)
         {
@@ -50,7 +45,6 @@ public partial class Duel : Node2D
             gm.OnGameOver += OnGameOver;
             gm.OnCardDrawn += OnCardDrawn;
             gm.OnBoardChanged += RefreshInfoLabels;
-            gm.OnEnhancedPickRequired += OnEnhancedPickRequired;
             RefreshInfoLabels();
             OnStateChanged(gm.CurrentState);
         }
@@ -66,7 +60,6 @@ public partial class Duel : Node2D
             gm.OnGameOver -= OnGameOver;
             gm.OnCardDrawn -= OnCardDrawn;
             gm.OnBoardChanged -= RefreshInfoLabels;
-            gm.OnEnhancedPickRequired -= OnEnhancedPickRequired;
         }
     }
 
@@ -77,44 +70,6 @@ public partial class Duel : Node2D
         lbl.AddThemeColorOverride("font_color", new Color(0.9f, 0.9f, 0.9f));
         AddChild(lbl);
         return lbl;
-    }
-
-    private void CreateEnhancedPickPanel()
-    {
-        _enhancedPickPanel = new PanelContainer
-        {
-            Visible = false,
-            CustomMinimumSize = new Vector2(420, 160),
-            Position = new Vector2(430, 280)
-        };
-
-        var vbox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        var title = new Label { Text = "강화패를 선택하세요!" };
-        title.HorizontalAlignment = HorizontalAlignment.Center;
-        vbox.AddChild(title);
-
-        var hbox = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        var picks = new (HandType type, string text, Color color)[]
-        {
-            (HandType.EnhancedRock,     "★바위", new Color(0.7f, 0.7f, 0.3f)),
-            (HandType.EnhancedPaper,    "★보",   new Color(0.3f, 0.7f, 1.0f)),
-            (HandType.EnhancedScissors, "★가위", new Color(1.0f, 0.5f, 0.5f)),
-        };
-        foreach (var (type, text, color) in picks)
-        {
-            var btn = new Button { CustomMinimumSize = new Vector2(120, 70), Text = text };
-            var style = new StyleBoxFlat { BgColor = color };
-            style.CornerRadiusTopLeft = style.CornerRadiusTopRight =
-            style.CornerRadiusBottomLeft = style.CornerRadiusBottomRight = 8;
-            btn.AddThemeStyleboxOverride("normal", style);
-            var captured = type;
-            btn.Pressed += () => OnEnhancedPickPressed(captured);
-            hbox.AddChild(btn);
-            _enhancedPickButtons.Add(btn);
-        }
-        vbox.AddChild(hbox);
-        _enhancedPickPanel.AddChild(vbox);
-        AddChild(_enhancedPickPanel);
     }
 
     // ── 이벤트 핸들러 ──────────────────────────────────────
@@ -130,8 +85,8 @@ public partial class Duel : Node2D
         switch (state)
         {
             case GameManager.GameState.Duel:
-                _enhancedPickPanel.Visible = false;
                 SetStatus(_isBlindActive ? "결투! (블라인드!) 패를 선택하세요" : "결투! 패를 선택하세요");
+                if (gm != null && gm.IsEmergency(GameManager.PlayerA)) ShowEmergencyPopup();
                 break;
             case GameManager.GameState.PickEnhanced:
                 SetStatus("강화패를 선택하세요!");
@@ -158,26 +113,32 @@ public partial class Duel : Node2D
         RefreshHandCards();
     }
 
-    private void OnGameOver(int winner)
+    private void OnGameOver(int winner, GameManager.GameOverReason _)
     {
         SetStatus(winner == GameManager.PlayerA ? "최종 승리!" : "최종 패배...");
         DisableHandButtons();
     }
 
-    private void OnEnhancedPickRequired(int playerId)
+    private void ShowEmergencyPopup()
     {
-        if (playerId != GameManager.PlayerA) return;
-        _enhancedPickPanel.Visible = true;
-        foreach (var btn in _enhancedPickButtons) btn.Disabled = false;
+        if (GetNodeOrNull("EmergencyPopup") != null) return;
+        var gm = GameManager.Instance;
+        if (gm == null) return;
+
+        var options = gm.GetEmergencyOptions();
+        var items = new ItemSelectPopup.ItemOption[options.Length];
+        for (int i = 0; i < options.Length; i++) items[i] = GameManager.BuildCardOption(options[i]);
+
+        var popup = new ItemSelectPopup { Name = "EmergencyPopup" };
+        AddChild(popup);
+        popup.Selected += (int idx) =>
+        {
+            GameManager.Instance?.EmergencyPickHand(GameManager.PlayerA, options[idx]);
+            SetStatus("긴급 픽 완료! 상대방의 결정을 기다리는 중...");
+        };
+        popup.Open("긴급! 덱/손패가 없습니다", items);
     }
 
-    private void OnEnhancedPickPressed(HandType hand)
-    {
-        var gm = GameManager.Instance;
-        if (gm?.CurrentState != GameManager.GameState.PickEnhanced) return;
-        gm.PickEnhancedCard(GameManager.PlayerA, hand);
-        _enhancedPickPanel.Visible = false;
-    }
 
     private void OnHandPressed(HandType hand)
     {

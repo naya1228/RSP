@@ -87,8 +87,20 @@ public partial class AiNetworkManager : Node, INetworkManager
         GD.Print("[AI] 1초 딜레이 완료");
         if (!IsConnected) return;
 
+        var gm = GameManager.Instance;
+
+        // 긴급 상황: 덱+손패 둘 다 0 → 2지선다 긴급 픽
+        if (gm.IsEmergency(GameManager.PlayerB))
+        {
+            var options = gm.GetEmergencyOptions();
+            var pick = options[_random.Next(options.Length)];
+            GD.Print($"[AI] 긴급 픽: {pick}");
+            gm.EmergencyPickHand(GameManager.PlayerB, pick);
+            return;
+        }
+
         // AI 결투 전략: 실제 손패에서 랜덤 선택 (Enhanced 포함)
-        var availableHands = new List<HandType>(GameManager.Instance.GetHand(GameManager.PlayerB));
+        var availableHands = new List<HandType>(gm.GetHand(GameManager.PlayerB));
 
         if (availableHands.Count == 0)
         {

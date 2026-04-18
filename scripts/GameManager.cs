@@ -44,14 +44,11 @@ public partial class GameManager : Node
     // 강화 보 효과: 다음 결투 블라인드
     private bool[] _isBlindNextDuel = new bool[2];
 
-    // 비김 제외 결투 승리 카운트 (3결투 2:1 체크용)
-    private int[] _duelWinCount = new int[2];
+    // 3이동턴마다 강화패 픽 팝업 트리거 (각 플레이어별)
+    private int[] _movePickCount = new int[2];
 
-    // 보충 회차 (0=첫 보충 전)
-    private int[] _replenishCount = new int[2];
-
-    // 패 보충 턴 카운터 (이동 + 결투 승패 각 +1, 비김 제외, 3이 되면 드로우)
-    private int[] _drawTurnCount = new int[2];
+    // 3결투마다 강화패 픽 팝업 트리거 (비김 제외, 전역 카운터)
+    private int _duelPickCount = 0;
 
     // 턴 카운트 (각 플레이어별)
     public int[] TurnCount { get; private set; } = new int[2];
@@ -71,6 +68,9 @@ public partial class GameManager : Node
     // 마지막 결투 패자 (PickEnhanced 후 Moving 전환 시 턴 설정용)
     private int _lastDuelLoser = -1;
 
+    // 연속 픽 대기열 (3결투 시 패자→승자 순)
+    private Queue<int> _pendingPickPlayers = new Queue<int>();
+
     // 네트워크 매니저 (AI, Local, Ably 모두 대응)
     private INetworkManager _networkManager;
 
@@ -79,7 +79,8 @@ public partial class GameManager : Node
     public event Action OnBoardChanged;
     public event Action<int> OnTurnChanged; // 새 턴 플레이어 id
     public event Action<int, HandType, int, HandType, int> OnDuelResolved; // p0Hand, p1Hand, winner(-1 = 비김)
-    public event Action<int> OnGameOver; // winner id
+    public enum GameOverReason { StreakLimit, ReachedStart }
+    public event Action<int, GameOverReason> OnGameOver; // winner id, reason
     public event Action<int> OnCardDrawn; // 드로우한 플레이어 id
     public event Action<int> OnEnhancedPickRequired; // 픽해야 할 플레이어 id
 
@@ -87,8 +88,89 @@ public partial class GameManager : Node
     public static bool IsEnhanced(HandType h) => h >= HandType.EnhancedRock;
     public static HandType GetBase(HandType h) => IsEnhanced(h) ? (HandType)((int)h - 3) : h;
 
+    // 카드 표시 유틸리티 (팝업 등 UI에서 재사용)
+    public static string GetCardName(HandType h) => h switch
+    {
+        HandType.Rock             => "바위",
+        HandType.Paper            => "보",
+        HandType.Scissors         => "가위",
+        HandType.EnhancedRock     => "★바위",
+        HandType.EnhancedPaper    => "★보",
+        HandType.EnhancedScissors => "★가위",
+        _                         => "?"
+    };
+
+    public static string GetCardDesc(HandType h) => h switch
+    {
+        HandType.Rock             => "기본 바위",
+        HandType.Paper            => "기본 보",
+        HandType.Scissors         => "기본 가위",
+        HandType.EnhancedRock     => "승리 시 상대 MaxLoseStreak -1\n(최소 1)",
+        HandType.EnhancedPaper    => "승리 시 상대 다음 결투\n블라인드",
+        HandType.EnhancedScissors => "가위vs가위 비김 시 승리",
+        _                         => ""
+    };
+
+    public static Color GetCardColor(HandType h)
+    {
+        bool enh = IsEnhanced(h);
+        return GetBase(h) switch
+        {
+            HandType.Rock     => enh ? new Color(0.7f, 0.7f, 0.3f) : new Color(0.5f, 0.5f, 0.5f),
+            HandType.Paper    => enh ? new Color(0.3f, 0.7f, 1.0f) : new Color(0.3f, 0.5f, 0.9f),
+            HandType.Scissors => enh ? new Color(1.0f, 0.5f, 0.5f) : new Color(0.9f, 0.3f, 0.3f),
+            _                 => new Color(0.8f, 0.8f, 0.8f),
+        };
+    }
+
+    public static ItemSelectPopup.ItemOption BuildCardOption(HandType card) => new()
+    {
+        Name  = GetCardName(card),
+        Desc  = GetCardDesc(card),
+        Color = GetCardColor(card),
+    };
+
     // 블라인드 여부 공개 (UI용)
     public bool IsBlindDuel(int playerId) => _isBlindNextDuel[playerId];
+
+    // 결투 시 덱+손패 모두 0인 긴급 상황 여부
+    public bool IsEmergency(int playerId)
+        => CurrentState == GameState.Duel
+        && _playerHands[playerId].Count == 0
+        && _playerDecks[playerId].Count == 0;
+
+    // 긴급 픽 옵션 2장 생성: 서로 다른 베이스, 각각 50% 강화
+    public HandType[] GetEmergencyOptions()
+    {
+        var bases = new List<HandType> { HandType.Rock, HandType.Paper, HandType.Scissors };
+        for (int i = bases.Count - 1; i > 0; i--)
+        {
+            int j = _rng.Next(i + 1);
+            (bases[i], bases[j]) = (bases[j], bases[i]);
+        }
+        var result = new HandType[2];
+        for (int i = 0; i < 2; i++)
+        {
+            bool enh = _rng.NextDouble() < 0.5;
+            result[i] = enh ? bases[i] switch
+            {
+                HandType.Rock => HandType.EnhancedRock,
+                HandType.Paper => HandType.EnhancedPaper,
+                HandType.Scissors => HandType.EnhancedScissors,
+                _ => bases[i]
+            } : bases[i];
+        }
+        return result;
+    }
+
+    // 긴급 픽 → 손패에 추가 후 즉시 제출
+    public bool EmergencyPickHand(int playerId, HandType hand)
+    {
+        if (!IsEmergency(playerId)) return false;
+        _playerHands[playerId].Add(hand);
+        GD.Print($"[Emergency] Player{playerId} 긴급 픽: {hand}");
+        return SubmitHand(playerId, hand);
+    }
 
     public override void _EnterTree()
     {
@@ -172,9 +254,7 @@ public partial class GameManager : Node
             TurnCount[p] = 0;
             MaxLoseStreak[p] = 3;
             _isBlindNextDuel[p] = false;
-            _duelWinCount[p] = 0;
-            _replenishCount[p] = 0;
-            _drawTurnCount[p] = 0;
+            _movePickCount[p] = 0;
             InitPlayerDeck(p);
         }
 
@@ -183,6 +263,8 @@ public partial class GameManager : Node
         WinnerId = -1;
         EnhancedPickPlayer = -1;
         _lastDuelLoser = -1;
+        _duelPickCount = 0;
+        _pendingPickPlayers.Clear();
         CurrentTurnPlayer = PlayerA;
 
         ChangeState(GameState.Moving);
@@ -228,7 +310,7 @@ public partial class GameManager : Node
         return _playerHands[playerId].Count(h => GetBase(h) == baseHand);
     }
 
-    // 드로우 (보충 규칙 적용)
+    // 드로우: 덱에서 일반패 1장 (강화는 3턴 픽에서만)
     private bool DrawCard(int playerId)
     {
         var deck = _playerDecks[playerId];
@@ -236,57 +318,11 @@ public partial class GameManager : Node
         int idx = _rng.Next(deck.Count);
         var card = deck[idx];
 
-        // 보충 회차 증가
-        _replenishCount[playerId]++;
-
-        // 강화패 변환 로직
-        if (_replenishCount[playerId] == 1)
-        {
-            // 1회차: 무조건 강화패로 변환
-            card = ToEnhanced(card);
-            GD.Print($"[DrawCard] Player{playerId} 1회차 보충 → 강화패: {card}");
-        }
-        else
-        {
-            // 2회차~: 70% 강화, 30% 일반
-            if (_rng.NextDouble() < 0.7)
-            {
-                card = ToEnhanced(card);
-                GD.Print($"[DrawCard] Player{playerId} {_replenishCount[playerId]}회차 보충 → 강화패: {card}");
-            }
-            else
-            {
-                GD.Print($"[DrawCard] Player{playerId} {_replenishCount[playerId]}회차 보충 → 일반패: {card}");
-            }
-        }
-
         _playerHands[playerId].Add(card);
         deck.RemoveAt(idx);
+        GD.Print($"[DrawCard] Player{playerId} 드로우: {card}");
         OnCardDrawn?.Invoke(playerId);
         return true;
-    }
-
-    // 보충 턴 카운터 증가 (3턴마다 드로우)
-    private void IncrementDrawTurn(int playerId)
-    {
-        _drawTurnCount[playerId]++;
-        GD.Print($"[DrawTurn] Player{playerId} 보충카운터={_drawTurnCount[playerId]}");
-        if (_drawTurnCount[playerId] >= 3)
-        {
-            _drawTurnCount[playerId] = 0;
-            DrawCard(playerId);
-        }
-    }
-
-    private static HandType ToEnhanced(HandType h)
-    {
-        return GetBase(h) switch
-        {
-            HandType.Rock => HandType.EnhancedRock,
-            HandType.Paper => HandType.EnhancedPaper,
-            HandType.Scissors => HandType.EnhancedScissors,
-            _ => h
-        };
     }
 
     // 이동 처리 (전진/후진)
@@ -305,7 +341,6 @@ public partial class GameManager : Node
         newPos = Mathf.Clamp(newPos, 0, BoardSize - 1);
         PlayerPositions[playerId] = newPos;
         TurnCount[playerId]++;
-        IncrementDrawTurn(playerId); // 이동 턴 카운트
 
         OnBoardChanged?.Invoke();
 
@@ -313,23 +348,34 @@ public partial class GameManager : Node
         int opponentStart = (playerId == PlayerA) ? 9 : 0;
         if (newPos == opponentStart)
         {
-            EndGame(playerId);
+            EndGame(playerId, GameOverReason.ReachedStart);
             return true;
         }
 
-        // 같은 칸 만나면 결투
+        // 같은 칸 만나면 결투 (픽 카운터 증가 없음)
         if (PlayerPositions[PlayerA] == PlayerPositions[PlayerB])
         {
             _duelHands[PlayerA] = -1;
             _duelHands[PlayerB] = -1;
             ChangeState(GameState.Duel);
-        }
-        else
-        {
-            CurrentTurnPlayer = 1 - CurrentTurnPlayer;
-            OnTurnChanged?.Invoke(CurrentTurnPlayer);
+            return true;
         }
 
+        // 3이동턴마다 강화패 픽
+        _movePickCount[playerId]++;
+        if (_movePickCount[playerId] >= 3)
+        {
+            _movePickCount[playerId] = 0;
+            _lastDuelLoser = 1 - playerId; // 픽 후 상대 턴
+            _pendingPickPlayers.Enqueue(playerId);
+            _duelHands[PlayerA] = -1;
+            _duelHands[PlayerB] = -1;
+            TriggerNextPick();
+            return true;
+        }
+
+        CurrentTurnPlayer = 1 - CurrentTurnPlayer;
+        OnTurnChanged?.Invoke(CurrentTurnPlayer);
         return true;
     }
 
@@ -342,30 +388,40 @@ public partial class GameManager : Node
 
         PlayerPositions[PlayerA] = targetTile;
         TurnCount[PlayerA]++;
-        IncrementDrawTurn(PlayerA); // 이동 턴 카운트
 
         OnBoardChanged?.Invoke();
 
         // 상대 출발점 도달 체크
         if (targetTile == 9)
         {
-            EndGame(PlayerA);
+            EndGame(PlayerA, GameOverReason.ReachedStart);
             return true;
         }
 
-        // 같은 칸 만나면 결투
+        // 같은 칸 만나면 결투 (픽 카운터 증가 없음)
         if (PlayerPositions[PlayerA] == PlayerPositions[PlayerB])
         {
             _duelHands[PlayerA] = -1;
             _duelHands[PlayerB] = -1;
             ChangeState(GameState.Duel);
-        }
-        else
-        {
-            CurrentTurnPlayer = 1 - CurrentTurnPlayer;
-            OnTurnChanged?.Invoke(CurrentTurnPlayer);
+            return true;
         }
 
+        // 3이동턴마다 강화패 픽
+        _movePickCount[PlayerA]++;
+        if (_movePickCount[PlayerA] >= 3)
+        {
+            _movePickCount[PlayerA] = 0;
+            _lastDuelLoser = PlayerB; // 픽 후 상대 턴
+            _pendingPickPlayers.Enqueue(PlayerA);
+            _duelHands[PlayerA] = -1;
+            _duelHands[PlayerB] = -1;
+            TriggerNextPick();
+            return true;
+        }
+
+        CurrentTurnPlayer = 1 - CurrentTurnPlayer;
+        OnTurnChanged?.Invoke(CurrentTurnPlayer);
         return true;
     }
 
@@ -463,34 +519,31 @@ public partial class GameManager : Node
         OnDuelResolved?.Invoke(PlayerA, h0, PlayerB, h1, winner);
         OnBoardChanged?.Invoke();
 
-        // 결투 승패 턴 카운트 (양쪽 모두)
-        IncrementDrawTurn(PlayerA);
-        IncrementDrawTurn(PlayerB);
-
         // 탈락 체크: MaxLoseStreak 기준
         if (LoseStreak[loser] >= MaxLoseStreak[loser])
         {
-            EndGame(winner);
+            EndGame(winner, GameOverReason.StreakLimit);
             return;
         }
 
-        // 비김 제외 결투 승리 카운트
-        _duelWinCount[winner]++;
-        GD.Print($"[DuelCount] _duelWinCount A={_duelWinCount[0]}, B={_duelWinCount[1]}");
+        // 결투 1번 = 양쪽 각자 드로우 1장
+        DrawCard(PlayerA);
+        DrawCard(PlayerB);
 
-        // 3결투 2:1 조건 체크 → 강화패 픽
-        if ((_duelWinCount[0] + _duelWinCount[1] == 3) && (_duelWinCount[0] == 2 || _duelWinCount[1] == 2))
+        // 3결투마다 양쪽 순차 픽 (패자 → 승자)
+        _duelPickCount++;
+        GD.Print($"[DuelCount] _duelPickCount={_duelPickCount}");
+        if (_duelPickCount >= 3)
         {
-            int pickPlayer = _duelWinCount[0] == 2 ? PlayerA : PlayerB;
-            _duelWinCount[0] = 0;
-            _duelWinCount[1] = 0;
-            EnhancedPickPlayer = pickPlayer;
-            GD.Print($"[Enhanced] 강화패 픽 조건 충족 → Player{pickPlayer} 픽 시작");
+            _duelPickCount = 0;
+            _lastDuelLoser = loser;
+            _pendingPickPlayers.Enqueue(loser);
+            _pendingPickPlayers.Enqueue(winner);
+            GD.Print($"[Enhanced] 3결투 도달 → 패자(P{loser}) → 승자(P{winner}) 순 픽");
 
             _duelHands[PlayerA] = -1;
             _duelHands[PlayerB] = -1;
-            ChangeState(GameState.PickEnhanced);
-            OnEnhancedPickRequired?.Invoke(pickPlayer);
+            TriggerNextPick();
             return;
         }
 
@@ -499,6 +552,25 @@ public partial class GameManager : Node
         ChangeState(GameState.Moving);
         CurrentTurnPlayer = loser; // 결투에서 진 쪽이 다음 이동
         OnTurnChanged?.Invoke(CurrentTurnPlayer);
+    }
+
+    // 대기열에서 다음 플레이어 픽 시작 (없으면 이동턴 복귀)
+    private void TriggerNextPick()
+    {
+        if (_pendingPickPlayers.Count == 0)
+        {
+            EnhancedPickPlayer = -1;
+            ChangeState(GameState.Moving);
+            CurrentTurnPlayer = _lastDuelLoser;
+            OnTurnChanged?.Invoke(CurrentTurnPlayer);
+            return;
+        }
+
+        int next = _pendingPickPlayers.Dequeue();
+        EnhancedPickPlayer = next;
+        GD.Print($"[Enhanced] Player{next} 픽 시작 (대기열 {_pendingPickPlayers.Count}명 남음)");
+        ChangeState(GameState.PickEnhanced);
+        OnEnhancedPickRequired?.Invoke(next);
     }
 
     // 강화패 픽 완료
@@ -511,10 +583,7 @@ public partial class GameManager : Node
         _playerHands[playerId].Add(enhancedHand);
         GD.Print($"[Enhanced] Player{playerId} 강화패 픽 완료: {enhancedHand}");
 
-        EnhancedPickPlayer = -1;
-        ChangeState(GameState.Moving);
-        CurrentTurnPlayer = _lastDuelLoser; // 결투에서 진 쪽이 다음 이동
-        OnTurnChanged?.Invoke(CurrentTurnPlayer);
+        TriggerNextPick();
         return true;
     }
 
@@ -534,10 +603,10 @@ public partial class GameManager : Node
 
     public bool HasAnyHand(int playerId) => _playerHands[playerId].Count > 0;
 
-    private void EndGame(int winner)
+    private void EndGame(int winner, GameOverReason reason)
     {
         WinnerId = winner;
         ChangeState(GameState.GameOver);
-        OnGameOver?.Invoke(winner);
+        OnGameOver?.Invoke(winner, reason);
     }
 }

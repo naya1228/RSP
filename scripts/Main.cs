@@ -56,9 +56,7 @@ public partial class Main : Node2D
     {
         if (_gameInstance == null || _duelInstance == null) return;
 
-        bool showDuel = state == GameManager.GameState.Duel
-                     || state == GameManager.GameState.PickEnhanced
-                     || state == GameManager.GameState.GameOver;
+        bool showDuel = state == GameManager.GameState.Duel;
 
         _gameInstance.Visible = !showDuel;
         _duelInstance.Visible = showDuel;
