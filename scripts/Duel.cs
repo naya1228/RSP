@@ -32,9 +32,9 @@ public partial class Duel : Node2D
         _handsBLabel = MakeLabel(new Vector2(40, 130));
         _streakLabel = MakeLabel(new Vector2(40, 160));
 
-        // 손패 패널 (화면 하단 중앙)
-        _handPanel = new HBoxContainer { Position = new Vector2(320, 560) };
-        _handPanel.AddThemeConstantOverride("separation", 20);
+        // 손패 패널 (화면 하단 중앙, 카드 130x210 고려)
+        _handPanel = new HBoxContainer { Position = new Vector2(280, 490) };
+        _handPanel.AddThemeConstantOverride("separation", 14);
         AddChild(_handPanel);
 
         var gm = GameManager.Instance;
@@ -187,7 +187,7 @@ public partial class Duel : Node2D
             }
             for (int i = 0; i < _blindShuffledHand.Count; i++)
             {
-                var btn = MakeCardButton("?", new Color(0.4f, 0.4f, 0.4f), false);
+                var btn = MakeCardButton("?", "???", new Color(0.4f, 0.4f, 0.4f), false);
                 btn.Disabled = !duel;
                 var idx = i;
                 btn.Pressed += () => OnHandPressedBlind(idx);
@@ -201,14 +201,7 @@ public partial class Duel : Node2D
             foreach (var card in hand)
             {
                 bool enh = GameManager.IsEnhanced(card);
-                var baseType = GameManager.GetBase(card);
-                Color bg = baseType switch {
-                    HandType.Rock     => enh ? new Color(0.7f,0.7f,0.3f) : new Color(0.5f,0.5f,0.5f),
-                    HandType.Paper    => enh ? new Color(0.3f,0.7f,1.0f) : new Color(0.3f,0.5f,0.9f),
-                    HandType.Scissors => enh ? new Color(1.0f,0.5f,0.5f) : new Color(0.9f,0.3f,0.3f),
-                    _                 => new Color(0.8f,0.8f,0.8f)
-                };
-                var btn = MakeCardButton(HandName(card), bg, enh);
+                var btn = MakeCardButton(GameManager.GetCardName(card), GameManager.GetCardDesc(card), GameManager.GetCardColor(card), enh);
                 btn.Disabled = !duel;
                 var captured = card;
                 btn.Pressed += () => OnHandPressed(captured);
@@ -218,20 +211,88 @@ public partial class Duel : Node2D
         }
     }
 
-    private static Button MakeCardButton(string text, Color bgColor, bool enhanced)
+    private const int CardW = 130;
+    private const int CardH = 210;
+    private const int CardIllustSize = 110;
+
+    private static Button MakeCardButton(string name, string desc, Color color, bool enhanced)
     {
-        var btn = new Button { CustomMinimumSize = new Vector2(100, 70), Text = text };
-        var style = new StyleBoxFlat { BgColor = bgColor };
-        style.CornerRadiusTopLeft = style.CornerRadiusTopRight =
-        style.CornerRadiusBottomLeft = style.CornerRadiusBottomRight = 8;
-        if (enhanced)
+        var btn = new Button
         {
-            style.BorderWidthTop = style.BorderWidthBottom =
-            style.BorderWidthLeft = style.BorderWidthRight = 3;
-            style.BorderColor = new Color(1.0f, 0.9f, 0.2f);
-        }
-        btn.AddThemeStyleboxOverride("normal", style);
+            CustomMinimumSize = new Vector2(CardW, CardH),
+            Text = "",
+            ClipText = false
+        };
+        SetHandCardStyle(btn, enhanced);
+
+        var vbox = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        vbox.AddThemeConstantOverride("separation", 4);
+        btn.AddChild(vbox);
+        vbox.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+
+        // 상단: 이름
+        var nameLabel = new Label
+        {
+            Text = name,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        nameLabel.AddThemeFontSizeOverride("font_size", 18);
+        nameLabel.AddThemeColorOverride("font_color", new Color(1f, 1f, 1f));
+        nameLabel.AddThemeConstantOverride("outline_size", 2);
+        nameLabel.AddThemeColorOverride("font_outline_color", new Color(0f, 0f, 0f));
+        vbox.AddChild(nameLabel);
+
+        // 중간: 일러스트 (현재는 컬러블록, 110x110)
+        var illust = new ColorRect
+        {
+            Color = color,
+            CustomMinimumSize = new Vector2(CardIllustSize, CardIllustSize),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter
+        };
+        vbox.AddChild(illust);
+
+        // 하단: 설명
+        var descLabel = new Label
+        {
+            Text = desc,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top,
+            AutowrapMode = TextServer.AutowrapMode.Word,
+            CustomMinimumSize = new Vector2(CardW - 12, 0),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill
+        };
+        descLabel.AddThemeFontSizeOverride("font_size", 12);
+        descLabel.AddThemeColorOverride("font_color", new Color(0.9f, 0.9f, 0.9f));
+        vbox.AddChild(descLabel);
+
         return btn;
+    }
+
+    private static void SetHandCardStyle(Button btn, bool enhanced)
+    {
+        var border = enhanced ? new Color(1.0f, 0.9f, 0.2f) : new Color(0.3f, 0.3f, 0.35f);
+        int bw = enhanced ? 3 : 2;
+
+        StyleBoxFlat Make(Color bg) => new()
+        {
+            BgColor = bg,
+            BorderColor = border,
+            BorderWidthLeft = bw, BorderWidthRight = bw,
+            BorderWidthTop = bw, BorderWidthBottom = bw,
+            ContentMarginLeft = 6, ContentMarginRight = 6,
+            ContentMarginTop = 6, ContentMarginBottom = 6,
+            CornerRadiusTopLeft = 8, CornerRadiusTopRight = 8,
+            CornerRadiusBottomLeft = 8, CornerRadiusBottomRight = 8,
+        };
+
+        btn.AddThemeStyleboxOverride("normal",   Make(new Color(0.15f, 0.15f, 0.2f)));
+        btn.AddThemeStyleboxOverride("hover",    Make(new Color(0.25f, 0.25f, 0.35f)));
+        btn.AddThemeStyleboxOverride("pressed",  Make(new Color(0.1f, 0.1f, 0.15f)));
+        btn.AddThemeStyleboxOverride("disabled", Make(new Color(0.12f, 0.12f, 0.15f)));
+        btn.AddThemeStyleboxOverride("focus",    Make(new Color(0.25f, 0.25f, 0.35f)));
     }
 
     private void RefreshInfoLabels()

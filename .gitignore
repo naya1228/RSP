@@ -1,8 +1,51 @@
-# Godot 4+ specific ignores
+# ---- Godot 4 ----
 .godot/
 /android/
+export.cfg
 
+# ---- C# / .NET ----
+bin/
+obj/
+.mono/
+*.user
+*.suo
+*.userprefs
+*.pidb
+*.pdb
+*.DotSettings.user
 
-#IDE settings
+# Rider / Visual Studio
+.idea/
+.vs/
+
+# NuGet
+*.nupkg
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# ---- 빌드 산출물 ----
+/build/
+/data_*/
+*.exe
+*.dll
+*.pck
+*.apk
+*.aab
+*.dmg
+*.zip
+
+# ---- IDE / 편집기 ----
 .claude/
 .vscode/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 로그 / 임시 ----
+*.log
+*.tmp
+logs/
+_workspace/
