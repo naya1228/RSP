@@ -34,6 +34,7 @@ artifacts/
 *.aab
 *.dmg
 *.zip
+*.7z
 
 # ---- IDE / 편집기 ----
 .claude/
